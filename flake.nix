@@ -50,22 +50,6 @@
       forAllSystems = f: lib.genAttrs systems (system: f system);
 
       mkPkgs = system: nixpkgs.legacyPackages.${system};
-
-      # tree-sitter-language-pack only ships macOS wheels tagged macosx_15_0,
-      # but nixpkgs pins darwinSdkVersion to 14.4; this is a pure metadata bump
-      # (no SDK/toolchain rebuild) so pyproject-nix accepts the prebuilt wheel
-      # instead of falling back to a from-source build that needs maturin/Rust.
-      mkStdenv =
-        pkgs:
-        if pkgs.stdenv.hostPlatform.isDarwin then
-          pkgs.stdenv
-          // {
-            buildPlatform = pkgs.stdenv.buildPlatform // { darwinSdkVersion = "15.0"; };
-            hostPlatform = pkgs.stdenv.hostPlatform // { darwinSdkVersion = "15.0"; };
-            targetPlatform = pkgs.stdenv.targetPlatform // { darwinSdkVersion = "15.0"; };
-          }
-        else
-          pkgs.stdenv;
     in
     {
       packages = forAllSystems (
@@ -75,17 +59,12 @@
 
           python = pkgs.python312;
 
-          pythonSet =
-            (pkgs.callPackage pyproject-nix.build.packages {
-              inherit python;
-              stdenv = mkStdenv pkgs;
-            }).overrideScope
-              (
-                lib.composeManyExtensions [
-                  pyproject-build-systems.overlays.default
-                  overlay
-                ]
-              );
+          pythonSet = (pkgs.callPackage pyproject-nix.build.packages { inherit python; }).overrideScope (
+            lib.composeManyExtensions [
+              pyproject-build-systems.overlays.default
+              overlay
+            ]
+          );
 
           venv = pythonSet.mkVirtualEnv "crapper-env" workspace.deps.default;
         in
@@ -114,17 +93,12 @@
 
           python = pkgs.python312;
 
-          pythonSet =
-            (pkgs.callPackage pyproject-nix.build.packages {
-              inherit python;
-              stdenv = mkStdenv pkgs;
-            }).overrideScope
-              (
-                lib.composeManyExtensions [
-                  pyproject-build-systems.overlays.default
-                  overlay
-                ]
-              );
+          pythonSet = (pkgs.callPackage pyproject-nix.build.packages { inherit python; }).overrideScope (
+            lib.composeManyExtensions [
+              pyproject-build-systems.overlays.default
+              overlay
+            ]
+          );
 
           venv = pythonSet.mkVirtualEnv "crapper-dev-env" workspace.deps.all;
         in
