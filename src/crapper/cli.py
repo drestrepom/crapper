@@ -246,7 +246,7 @@ def _explicit_files(existing: list[Path]) -> list[Path]:
     for path in existing:
         if path.is_dir():
             files.extend(iter_source_files([path]))
-        elif language_of(path) is not None:
+        elif language_of(path) is not None and not is_test_file(path):
             files.append(path)
     return files
 

@@ -193,6 +193,17 @@ def test_selects_directories_filters_and_changed_files(tmp_path, monkeypatch, ca
     assert "No source files" not in captured.out
 
 
+def test_explicit_test_file_is_not_analyzed(tmp_path, capsys):
+    # --changed ya excluye _test.go via is_test_file (_changed_source); pasarlo
+    # como argumento explícito se saltaba ese filtro y lo analizaba como
+    # código de producción, con 0% de "cobertura" porque go test no instrumenta
+    # sus propios _test.go -- CRAP salía inflado y bloqueaba el push por un
+    # archivo que no era el problema.
+    _write(tmp_path, "widget_test.go", "package widget\n\nfunc TestWidget(t *T) {}\n")
+    assert run(["--root", str(tmp_path), "--no-coverage", "widget_test.go"]) == 0
+    assert "No source files" in capsys.readouterr().out
+
+
 def test_run_asks_for_coverage_when_it_is_enabled(tmp_path, monkeypatch):
     _write(tmp_path, "src/demo/core.clj", "(ns demo.core)\n\n(defn choose [x]\n  x)\n")
     called = []
