@@ -410,3 +410,99 @@ def test_main_exits_with_the_status(monkeypatch):
         assert exc.code == 4
     else:
         raise AssertionError("main did not exit")
+
+
+def test_diff_range_keeps_only_functions_touched_since_the_base(tmp_path):
+    _git = ["git", "-C", str(tmp_path)]
+    subprocess.run([*_git, "init"], check=True, capture_output=True)
+    subprocess.run([*_git, "config", "user.email", "t@example.com"], check=True)
+    subprocess.run([*_git, "config", "user.name", "t"], check=True)
+    demo = tmp_path / "demo.go"
+    demo.write_text(
+        "package demo\n"
+        "\n"
+        "func Old() int {\n"
+        "\tif true {\n"
+        "\t\treturn 1\n"
+        "\t}\n"
+        "\treturn 0\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    subprocess.run([*_git, "add", "demo.go"], check=True)
+    subprocess.run([*_git, "commit", "-m", "init"], check=True, capture_output=True)
+    base = subprocess.run(
+        [*_git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    demo.write_text(
+        "package demo\n"
+        "\n"
+        "func Old() int {\n"
+        "\tif true {\n"
+        "\t\treturn 1\n"
+        "\t}\n"
+        "\treturn 0\n"
+        "}\n"
+        "\n"
+        "func New() int {\n"
+        "\treturn 2\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    subprocess.run([*_git, "add", "demo.go"], check=True)
+    subprocess.run([*_git, "commit", "-m", "add New"], check=True, capture_output=True)
+
+    assert run(
+        ["--root", str(tmp_path), "--no-coverage", "--diff-range", base, "demo.go"]
+    ) == 0
+    text = (tmp_path / ".metrics" / "crap.edn").read_text(encoding="utf-8")
+    assert ':name "New"' in text
+    assert "Old" not in text
+
+
+def test_diff_range_keeps_a_function_whose_body_changed(tmp_path):
+    _git = ["git", "-C", str(tmp_path)]
+    subprocess.run([*_git, "init"], check=True, capture_output=True)
+    subprocess.run([*_git, "config", "user.email", "t@example.com"], check=True)
+    subprocess.run([*_git, "config", "user.name", "t"], check=True)
+    demo = tmp_path / "demo.go"
+    demo.write_text(
+        "package demo\n"
+        "\n"
+        "func Old() int {\n"
+        "\treturn 1\n"
+        "}\n"
+        "\n"
+        "func Touched() int {\n"
+        "\treturn 1\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    subprocess.run([*_git, "add", "demo.go"], check=True)
+    subprocess.run([*_git, "commit", "-m", "init"], check=True, capture_output=True)
+    base = subprocess.run(
+        [*_git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    demo.write_text(
+        "package demo\n"
+        "\n"
+        "func Old() int {\n"
+        "\treturn 1\n"
+        "}\n"
+        "\n"
+        "func Touched() int {\n"
+        "\treturn 2\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    subprocess.run([*_git, "add", "demo.go"], check=True)
+    subprocess.run([*_git, "commit", "-m", "touch Touched"], check=True, capture_output=True)
+
+    assert run(
+        ["--root", str(tmp_path), "--no-coverage", "--diff-range", base, "demo.go"]
+    ) == 0
+    text = (tmp_path / ".metrics" / "crap.edn").read_text(encoding="utf-8")
+    assert ':name "Touched"' in text
+    assert "Old" not in text

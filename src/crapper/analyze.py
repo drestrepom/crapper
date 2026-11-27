@@ -32,10 +32,19 @@ def _source_path(file: Path, root: Path) -> str:
         return file.as_posix()
 
 
+def _touched(function: Function, changed_lines: set[int] | None) -> bool:
+    """Whether `function`'s span overlaps a line `--diff-range` flagged as changed."""
+
+    if changed_lines is None:
+        return True
+    return any(line in changed_lines for line in range(function.start_line, function.end_line + 1))
+
+
 def analyze_files(
     files: list[Path],
     project_root: Path,
     bundle: CoverageBundle | None,
+    changed_ranges: dict[str, set[int]] | None = None,
 ) -> list[Entry]:
     root = project_root.resolve()
     if bundle is not None:
@@ -51,6 +60,8 @@ def analyze_files(
             relative = file.relative_to(root).as_posix()
         except ValueError:
             relative = file.as_posix()
+        changed_lines = None if changed_ranges is None else changed_ranges.get(relative, set())
         for function in functions_in_file(language, source, relative, str(root)):
-            entries.append(make_entry(function, _coverage(bundle, function)))
+            if _touched(function, changed_lines):
+                entries.append(make_entry(function, _coverage(bundle, function)))
     return sort_entries(entries)

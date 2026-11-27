@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -59,6 +60,10 @@ Options:
   --coverage-command <cmd>      Run this command instead of the per-language
                                 coverage tools, then read the reports it wrote.
   --threshold <number>          Exit 2 when the worst CRAP score is above this.
+  --diff-range <ref>            Score only functions with a line touched by
+                                `git diff <ref> HEAD` on their file. Functions
+                                untouched since <ref> are left out of the
+                                report even when their file was selected.
 
 Arguments:
   path              File or directory to analyze. Test paths are included when
@@ -100,6 +105,7 @@ class Options:
     coverage_command: str | None = None
     threshold: float | None = None
     changed: bool = False
+    diff_range: str | None = None
 
 
 def _take(args: list[str], index: int, option: str) -> str:
@@ -148,6 +154,10 @@ def parse_args(argv: list[str] | None = None) -> Options:
             if arg == "--changed":
                 options.changed = True
                 index += 1
+                continue
+            if arg == "--diff-range":
+                options.diff_range = _take(args, index, arg)
+                index += 2
                 continue
             if arg.startswith("-"):
                 raise ValueError(f"Unknown option: {arg}")
@@ -261,6 +271,41 @@ def _selected(options: Options, root: Path, existing: list[Path]) -> list[Path]:
     return iter_source_files([root])
 
 
+def _hunk_new_lines(diff_text: str) -> set[int]:
+    """Lines touched in the new side of a `git diff -U0` hunk header.
+
+    `@@ -a,b +c,d @@`: `d` lines starting at `c` were added or kept as
+    context (none, here, since -U0 drops context). `d == 0` is a pure
+    deletion with nothing added at that point; `c` still marks where it
+    happened, so a function straddling it counts as touched.
+    """
+
+    lines: set[int] = set()
+    for match in re.finditer(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", diff_text, re.MULTILINE):
+        start = int(match.group(1))
+        count = int(match.group(2)) if match.group(2) is not None else 1
+        if count == 0:
+            lines.add(max(start, 1))
+        else:
+            lines.update(range(start, start + count))
+    return lines
+
+
+def _diff_ranges(root: Path, ref: str, files: list[Path]) -> dict[str, set[int]]:
+    """Changed line numbers (current side) per file relative to `root`, since `ref`."""
+
+    ranges: dict[str, set[int]] = {}
+    for file in files:
+        resolved = file.resolve()
+        try:
+            relative = resolved.relative_to(root).as_posix()
+        except ValueError:
+            relative = resolved.as_posix()
+        diff = _git(root, ["diff", "--unified=0", ref, "HEAD", "--", relative])
+        ranges[relative] = _hunk_new_lines(diff.stdout) if diff.returncode == 0 else set()
+    return ranges
+
+
 def _apply_filters(files: list[Path], filters: list[str]) -> list[Path]:
     if not filters:
         return files
@@ -319,7 +364,8 @@ def run(argv: list[str] | None = None) -> int:
         print("No source files to analyze.")
         return 0
 
-    entries = analyze_files(files, root, _coverage_bundle(options, root, files))
+    changed_ranges = _diff_ranges(root, options.diff_range, files) if options.diff_range else None
+    entries = analyze_files(files, root, _coverage_bundle(options, root, files), changed_ranges)
     metrics = write_metrics(entries, root)
     print(format_report(entries), end="", flush=True)
     print(f"Wrote {metrics}", file=sys.stderr)
