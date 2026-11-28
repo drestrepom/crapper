@@ -299,9 +299,18 @@ def branch_percent(record, start: int, end: int) -> float | None:
 
 
 def parse_go_profile(text: str) -> dict[str, list[tuple[int, int, int, int]]]:
-    """Map file → (start_line, end_line, statements, hits)."""
+    """Map file → (start_line, end_line, statements, hits).
 
-    out: dict[str, list[tuple[int, int, int, int]]] = {}
+    `-coverpkg=./...` makes every test binary write every block in the
+    module, so the same block (same file:start,end,statements) repeats once
+    per binary, almost always with 0 hits from binaries that don't exercise
+    it. `go tool cover` merges those duplicates before computing percentages
+    (summing hits, same as `count`/`atomic` mode); without that merge a
+    well-covered block reads as covered by only a fraction of its copies.
+    """
+
+    merged: dict[tuple[str, int, int, int], int] = {}
+    order: list[tuple[str, int, int, int]] = []
     for line_number, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip()
         if not line or line.startswith("mode:"):
@@ -315,6 +324,14 @@ def parse_go_profile(text: str) -> dict[str, list[tuple[int, int, int, int]]]:
         end_line = int(end_text.split(".", 1)[0])
         statements = int(fields[1])
         hits = int(fields[2])
+        key = (file_part, start_line, end_line, statements)
+        if key not in merged:
+            order.append(key)
+            merged[key] = 0
+        merged[key] += hits
+    out: dict[str, list[tuple[int, int, int, int]]] = {}
+    for file_part, start_line, end_line, statements in order:
+        hits = merged[(file_part, start_line, end_line, statements)]
         out.setdefault(file_part, []).append((start_line, end_line, statements, hits))
     return out
 

@@ -74,6 +74,23 @@ def test_go_profile_matches_crap4go_statement_ranges():
     assert go_percent(profile, "other.go", 1, 3) is None
 
 
+def test_go_profile_merges_duplicate_blocks_from_coverpkg():
+    """`-coverpkg=./...` makes every test binary write every block in the module.
+
+    A block only one binary actually exercises still shows up, with 0 hits,
+    once per binary that doesn't exercise it. go tool cover merges duplicate
+    blocks (same file:start,end,statements) before computing percentages;
+    crapper must do the same, or a well-tested function reads as ~2% covered.
+    """
+
+    duplicates = "\n".join(
+        "github.com/acme/demo/board.go:4.1,6.2 2 0" for _ in range(40)
+    )
+    text = f"mode: set\n{duplicates}\ngithub.com/acme/demo/board.go:4.1,6.2 2 1\n"
+    profile = parse_go_profile(text)
+    assert go_percent(profile, "board.go", 4, 6) == 100.0
+
+
 def test_jacoco_instruction_coverage_joins_on_class_and_method():
     xml = """<?xml version="1.0"?>
     <report>
